@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trigonometric Graphing Tool</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #f9f9f9; }
+    .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .equation-display { text-align: center; font-size: 24px; font-weight: bold; color: #0066cc; margin-bottom: 15px; background: #eef6ff; padding: 10px; border-radius: 6px; border: 1px solid #cce0ff; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; background: #eee; padding: 15px; border-radius: 6px; }
+    label { display: block; font-weight: bold; margin-bottom: 5px; }
+    input, select, button { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { background: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; border-radius: 4px; }
+    button:hover { background: #004b99; }
+    canvas { width: 100%; height: 450px; background: #fff; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>Trigonometric Graphing Tool</h2>
+  
+  <div class="equation-display" id="equationText">y = sin(x)</div>
+
+  <div class="controls">
+    <div>
+      <label>Function Type</label>
+      <select id="funcType" onchange="resetAndDraw()">
+        <option value="sin">a sin(bx) + c</option>
+        <option value="cos">a cos(bx) + c</option>
+        <option value="tan">a tan(bx) + c</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Angle Unit</label>
+      <select id="angleUnit" onchange="toggleAngleUnit()">
+        <option value="deg">Degrees (°)</option>
+        <option value="rad">Radians (rad)</option>
+      </select>
+    </div>
+    
+    <div>
+      <label>a:</label>
+      <input type="number" id="inputA" value="1" step="0.5" onchange="draw()">
+    </div>
+    
+    <div>
+      <label>b:</label>
+      <input type="number" id="inputB" value="1" step="0.5" onchange="draw()">
+    </div>
+    
+    <div>
+      <label>c:</label>
+      <input type="number" id="inputC" value="0" step="0.5" onchange="triggerAnimation()">
+    </div>
+
+    <div>
+      <label id="xMinLabel">X Min (deg):</label>
+      <input type="text" id="xMin" value="0" onchange="draw()">
+    </div>
+
+    <div>
+      <label id="xMaxLabel">X Max (deg):</label>
+      <input type="text" id="xMax" value="360" onchange="draw()">
+    </div>
+
+    <div>
+      <label>&nbsp;</label>
+      <label><input type="checkbox" id="showDefault" checked onchange="draw()"> Show Default Graph</label>
+    </div>
+
+    <div>
+      <label>&nbsp;</label>
+      <button onclick="triggerAnimation()">Replay Shift Animation</button>
+    </div>
+  </div>
+
+  <canvas id="graphCanvas" width="800" height="450"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('graphCanvas');
+const ctx = canvas.getContext('2d');
+
+let animCurrentC = 0;
+let animTargetC = 0;
+let animStartTime = null;
+
+function parsePiValue(inputVal, isRad) {
+  if (!isRad) return parseFloat(inputVal) || 0;
+  let str = String(inputVal).trim().toLowerCase().replace(/\s+/g, '');
+  if (!str) return 0;
+  
+  // Replace 'pi' with Math.PI evaluation
+  if (str.includes('pi')) {
+    let factor = str.replace('pi', '');
+    if (factor === '' || factor === '+') return Math.PI;
+    if (factor === '-') return -Math.PI;
+    if (factor.includes('/')) {
+      let parts = factor.split('/');
+      let num = parts[0] === '' || parts[0] === '+' ? 1 : (parts[0] === '-' ? -1 : parseFloat(parts[0]));
+      let den = parseFloat(parts[1]) || 1;
+      return (num / den) * Math.PI;
+    }
+    return parseFloat(factor) * Math.PI;
+  }
+  return parseFloat(str) || 0;
+}
+
+function formatPiLabel(radVal) {
+  let multiple = radVal / Math.PI;
+  let roundedMult = Math.round(multiple * 4) / 4; // Round to nearest 0.25 (pi/4)
+  
+  if (Math.abs(roundedMult) < 0.01) return "0";
+
+  let fracMap = {
+    0.5: "π/2",
+    1: "π",
+    1.5: "3π/2",
+    2: "2π",
+    2.5: "5π/2",
+    3: "3π",
+    3.5: "7π/2",
+    4: "4π"
+  };
+
+  let absMult = Math.abs(roundedMult);
+  let sign = roundedMult < 0 ? "-" : "";
+
+  if (fracMap[absMult]) {
+    return sign + fracMap[absMult];
+  }
+
+  // Fallback for general fraction rendering
+  let den = 4;
+  let num = Math.round(absMult * den);
+  if (num % 2 === 0) { num /= 2; den /= 2; }
+  if (num % 2 === 0) { num /= 2; den /= 2; }
+
+  if (den === 1) return sign + (num === 1 ? "" : num) + "π";
+  return sign + (num === 1 ? "" : num) + "π/" + den;
+}
+
+function toggleAngleUnit() {
+  const isRad = document.getElementById('angleUnit').value === 'rad';
+  document.getElementById('xMinLabel').innerText = isRad ? "X Min (rad):" : "X Min (deg):";
+  document.getElementById('xMaxLabel').innerText = isRad ? "X Max (rad):" : "X Max (deg):";
+  
+  if (isRad) {
+    document.getElementById('xMin').value = "0";
+    document.getElementById('xMax').value = "2pi";
+  } else {
+    document.getElementById('xMin').value = "0";
+    document.getElementById('xMax').value = "360";
+  }
+  draw();
+}
+
+function resetAndDraw() {
+  document.getElementById('inputA').value = 1;
+  document.getElementById('inputB').value = 1;
+  document.getElementById('inputC').value = 0;
+  draw();
+}
+
+function triggerAnimation() {
+  animTargetC = parseFloat(document.getElementById('inputC').value) || 0;
+  animCurrentC = 0;
+  animStartTime = performance.now();
+  requestAnimationFrame(animateShift);
+}
+
+function animateShift(timestamp) {
+  let progress = (timestamp - animStartTime) / 1000;
+  if (progress > 1) progress = 1;
+  
+  animCurrentC = animTargetC * progress;
+  draw(animCurrentC);
+  
+  if (progress < 1) {
+    requestAnimationFrame(animateShift);
+  }
+}
+
+function updateEquationDisplay(a, b, c, func) {
+  let eq = "y = ";
+
+  if (a === -1) eq += "-";
+  else if (a !== 1) eq += a;
+
+  eq += func + "(";
+
+  if (b === -1) eq += "-x";
+  else if (b === 1) eq += "x";
+  else eq += b + "x";
+
+  eq += ")";
+
+  if (c > 0) eq += " + " + c;
+  else if (c < 0) eq += " - " + Math.abs(c);
+
+  document.getElementById('equationText').innerText = eq;
+}
+
+function draw(overrideC = null) {
+  const func = document.getElementById('funcType').value;
+  const isRad = document.getElementById('angleUnit').value === 'rad';
+  const a = parseFloat(document.getElementById('inputA').value) || 1;
+  const b = parseFloat(document.getElementById('inputB').value) || 1;
+  const c = overrideC !== null ? overrideC : (parseFloat(document.getElementById('inputC').value) || 0);
+  const showDefault = document.getElementById('showDefault').checked;
+  
+  updateEquationDisplay(a, b, c, func);
+
+  let xMinVal = parsePiValue(document.getElementById('xMin').value, isRad);
+  let xMaxVal = parsePiValue(document.getElementById('xMax').value, isRad);
+  
+  let minLimit = isRad ? -2 * Math.PI : -720;
+  let maxLimit = isRad ? 4 * Math.PI : 720;
+
+  if (xMaxVal <= xMinVal) xMaxVal = xMinVal + (isRad ? 2 * Math.PI : 360);
+
+  const yMin = -5;
+  const yMax = 5;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Coordinate mapping functions
+  const toScreenX = (val) => ((val - xMinVal) / (xMaxVal - xMinVal)) * canvas.width;
+  const toScreenY = (y) => canvas.height - ((y - yMin) / (yMax - yMin)) * canvas.height;
+
+  let yAxisScreenX = toScreenX(0);
+  let labelXPos = Math.max(10, Math.min(canvas.width - 25, yAxisScreenX + 5));
+
+  // 1. Draw Grid Lines & Labels for Y-axis (-5 to 5 with step 1)
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#111';
+  ctx.font = 'bold 12px sans-serif';
+
+  for (let y = yMin; y <= yMax; y++) {
+    let sy = toScreenY(y);
+    ctx.beginPath();
+    ctx.moveTo(0, sy);
+    ctx.lineTo(canvas.width, sy);
+    ctx.stroke();
+    
+    if (y !== 0) {
+      ctx.fillText(y, labelXPos, sy - 3);
+    }
+  }
+
+  // 2. Draw Grid Lines & Labels for X-axis (90° or pi/2 intervals)
+  let step = isRad ? Math.PI / 2 : 90;
+  let startTick = Math.ceil(xMinVal / step) * step;
+  let xAxisScreenY = toScreenY(0);
+  let labelYPos = Math.max(15, Math.min(canvas.height - 10, xAxisScreenY - 5));
+
+  for (let xVal = startTick; xVal <= xMaxVal + 0.0001; xVal += step) {
+    let sx = toScreenX(xVal);
+    ctx.beginPath();
+    ctx.moveTo(sx, 0);
+    ctx.lineTo(sx, canvas.height);
+    ctx.stroke();
+
+    let label = isRad ? formatPiLabel(xVal) : Math.round(xVal) + '°';
+    ctx.fillText(label, sx + 3, labelYPos);
+  }
+
+  // 3. Draw Main Axes (X-axis at y=0, Y-axis at x=0)
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 2;
+
+  // Horizontal X-axis (y = 0)
+  ctx.beginPath();
+  ctx.moveTo(0, xAxisScreenY);
+  ctx.lineTo(canvas.width, xAxisScreenY);
+  ctx.stroke();
+
+  // Vertical Y-axis (fixed at x = 0)
+  if (xMinVal <= 0 && xMaxVal >= 0) {
+    ctx.beginPath();
+    ctx.moveTo(yAxisScreenX, 0);
+    ctx.lineTo(yAxisScreenX, canvas.height);
+    ctx.stroke();
+  }
+
+  // 4. Draw Axis Names ("x" and "y")
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 16px sans-serif';
+  
+  ctx.fillText('x', canvas.width - 20, Math.max(20, Math.min(canvas.height - 10, xAxisScreenY - 10)));
+
+  if (xMinVal <= 0 && xMaxVal >= 0) {
+    ctx.fillText('y', Math.max(10, Math.min(canvas.width - 20, yAxisScreenX + 10)), 20);
+  } else {
+    ctx.fillText('y', 10, 20);
+  }
+
+  // 5. Draw Red Dotted Center Line (Horizontal Axis y = c)
+  ctx.setLineDash([6, 6]);
+  ctx.strokeStyle = '#d9534f';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let centerLineY = toScreenY(c);
+  ctx.moveTo(0, centerLineY);
+  ctx.lineTo(canvas.width, centerLineY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Evaluate function
+  const evalFunc = (xVal, valA, valB, valC) => {
+    let rad = isRad ? xVal : (xVal * Math.PI) / 180;
+    if (func === 'sin') return valA * Math.sin(valB * rad) + valC;
+    if (func === 'cos') return valA * Math.cos(valB * rad) + valC;
+    if (func === 'tan') return valA * Math.tan(valB * rad) + valC;
+  };
+
+  // 6. Draw Default Graph (Dotted Gray)
+  if (showDefault) {
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let px = 0; px <= canvas.width; px++) {
+      let xVal = xMinVal + (px / canvas.width) * (xMaxVal - xMinVal);
+      let yVal = evalFunc(xVal, 1, 1, 0);
+      let sy = toScreenY(yVal);
+
+      if (func === 'tan' && Math.abs(yVal) > 10) {
+        ctx.stroke();
+        ctx.beginPath();
+      } else if (px === 0) {
+        ctx.moveTo(px, sy);
+      } else {
+        ctx.lineTo(px, sy);
+      }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 7. Draw Transformed Graph (Solid Blue)
+  ctx.strokeStyle = '#0066cc';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let px = 0; px <= canvas.width; px++) {
+    let xVal = xMinVal + (px / canvas.width) * (xMaxVal - xMinVal);
+    let yVal = evalFunc(xVal, a, b, c);
+    let sy = toScreenY(yVal);
+
+    if (func === 'tan' && Math.abs(yVal) > 10) {
+      ctx.stroke();
+      ctx.beginPath();
+    } else if (px === 0) {
+      ctx.moveTo(px, sy);
+    } else {
+      ctx.lineTo(px, sy);
+    }
+  }
+  ctx.stroke();
+}
+
+window.onload = draw;
+</script>
+
+</body>
+</html>
